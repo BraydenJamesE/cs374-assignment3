@@ -16,7 +16,7 @@
 
 pid_t backgroundProcesses[1000];
 int numberOfBackgroundProcesses = 0;
-int lastStatus = 0;
+int lastExitStatus = 0;
 char* home; // this variable will hold the home directory.
 
 char currentWorkingDirectory[MAX_PATH_LENGTH]; // storing a variable that holds the value of the current working directory. This variable is set to the current working directory at the start of the program.
@@ -32,12 +32,40 @@ struct Command {
     char* commentContents;
     bool isCd;
     bool isComment;
+    char* commandFilePath;
 };
-
 
 void freeStructMemory(struct Command *cmd) { // freeing all the memory associated with the struct.
     free(cmd->name);
+    if (cmd->commandFilePath != NULL) { // if it is null, then memory was never allocated to it.
+        free(cmd->commandFilePath);
+    }
 } // end of "freeStructMemory" function
+
+
+char* getCommandFilePath(char* command) {
+    char* path = getenv("PATH");
+    if (path == NULL) { // handling an error case before using path
+        fprintf(stderr, "Path variable not available\n");
+        return NULL;
+    }
+    char* delim = ":"; // separating each segment of the path by its delimiter.
+    char* token = strtok(path, delim); // getting the first output of path
+    char* fullPath = malloc(sizeof (char) * 200); // allocating memory to the file path
+
+    while (token != NULL) {
+        snprintf(fullPath, 200, "%s/%s", token, command);
+
+        if (access(fullPath, X_OK) != -1) {
+            return fullPath; // allocating memory to be returned.
+        }
+        token = strtok(NULL, delim);
+    }
+
+    fprintf(stderr, "Error: Command '%s' not found\n", command); // if file path is not available, output error message
+    free(fullPath); // free allocated memory
+    exit(EXIT_FAILURE); // send exit status of 1
+} // end of "getCommandFilePath" function
 
 
 void killBackgroundProcesses() {
@@ -111,8 +139,14 @@ struct Command getUserInput() {
     else if (checkForExit(buffer)) {
         strcpy(cmd.name, EXIT_NAME);
     }
+    else {
+        token = strtok(buffer, NOT_ALPHA);
+        strcpy(cmd.name, token);
+    }
+
     return cmd;
 } // end of "getUserInput" function
+
 
 void handleUserInput(struct Command cmd) {
     if (cmd.isCd) {
@@ -132,9 +166,34 @@ void handleUserInput(struct Command cmd) {
     else if (checkForStatus(cmd.name)) {
     }
     else if(!cmd.isComment) { // handle all other scenarios that are not comments.
-        printf("Non Standard arg\n");
-        printf("cmd.name: %s\n", cmd.name);
-        printf("cmd.isCd: %d\n", cmd.isCd);
+        pid_t pid = fork();
+        if (pid == -1) { // checking if the fork failed before using
+            perror("fork");
+            return;
+        }
+        else if (pid == 0) { // child proccess
+            char* filePathToCommand = getCommandFilePath(cmd.name);
+            cmd.commandFilePath = filePathToCommand;
+            printf("filePathToCommand: %s\n", filePathToCommand);
+            cmd.args = malloc(sizeof(char*) * (3));
+            cmd.args[0] = malloc(sizeof(char) * strlen(cmd.commandFilePath) + 1);
+            strcpy(cmd.args[0], cmd.commandFilePath);
+            if (execv(cmd.commandFilePath, cmd.args) == -1) {
+                if (errno == ENOENT) { // checking if errno equals "no such directory entry"
+                    printf("Error: Command not found: %s\n", cmd.name);
+                    exit(EXIT_FAILURE);
+                }
+                printf("Error in execv\n");
+                perror("execv\n"); // printing the error.
+            }
+        }
+        else { // parent process
+            int status;
+            if (waitpid(pid, &status, 0) == -1) { // outputting the error of waitpid before using it
+                perror("waitpid");
+            } // wait for the child process to finish
+            lastExitStatus = WEXITSTATUS(status); // setting the last exit status to the child exit status.
+        }
     }
 } // end of "handleUserInput" function
 
