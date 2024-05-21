@@ -31,7 +31,6 @@ struct Command {
     char* outputFile;
     bool runInBackground;
     char* cdFilePath;
-    char* commentContents;
     bool isCd;
     bool isComment;
     char* commandFilePath;
@@ -130,7 +129,6 @@ struct Command getUserInput() {
     printf(": ");
     fgets(buffer, sizeof(buffer), stdin);
     buffer[strcspn(buffer, "\n")] = '\0'; // scan buffer until it finds the newline char and replace it with null terminator.
-    printf("buffer1: %s\n", buffer);
     cmd.name = malloc(sizeof(char) * 15); // allocating 15 characters to the name.
 
     if (checkForCD(buffer)) { // checking if the cd command was in the buffer
@@ -151,51 +149,48 @@ struct Command getUserInput() {
         strcpy(cmd.name, token);
     }
     else { // commands other than standard (exit, cd, & status) and comment.
-        printf("buffer2: %s\n", buffer);
         token = strtok(buffer, NOT_ALPHA);
         if (token == NULL) {
             fprintf(stderr, "No command found\n");
             exit(EXIT_FAILURE);
         }
         strcpy(cmd.name, token); // getting the command
-        printf("cmd.name: %s\n", token);
         int avoidInfLoopIndex = 0;
         cmd.numberOfArgs = 0; // setting the number of commands to 0 for use in loop.
         cmd.args = malloc(sizeof(char*) * (MAX_NUM_ARGS + 1)); // allocating the proper memory amount to args.
         while (true) {
-            avoidInfLoopIndex += 1;
-            if (avoidInfLoopIndex == 100) {
-                break;
+            if (cmd.numberOfArgs == 0) { // adding the command to the args
+                cmd.numberOfArgs += 1;
+                cmd.args[0] = malloc(sizeof(char) * (strlen(cmd.name) + 1));
+                strcpy(cmd.args[0], cmd.name);
+                cmd.args[1] = NULL;
+                continue;
             }
-
-            token = strtok(NULL, " ");
+            token = strtok(NULL, NOT_ALPHA);
             if (token == NULL) {
                 break; // no more arguments
             }
-            printf("Token: %s\n", token);
             if (token[0] != '<' && token[0] != '>' && token[0] != '&') {
-                if (cmd.numberOfArgs == 0) {
-                    cmd.numberOfArgs += 1;
-                    cmd.args[0] = malloc(sizeof(char) * (strlen(token) + 1));
-                    strcpy(cmd.args[0], token);
-                    cmd.args[1] = NULL;
-                }
-                else {
-                    cmd.numberOfArgs += 1;
-                    cmd.args[cmd.numberOfArgs - 1] = malloc(sizeof(char) * (strlen(token) + 1));
-                    strcpy(cmd.args[cmd.numberOfArgs - 1], token);
-                    cmd.args[cmd.numberOfArgs] = NULL;
-                }
+                cmd.numberOfArgs += 1;
+                cmd.args[cmd.numberOfArgs - 1] = malloc(sizeof(char) * (strlen(token) + 1));
+                strcpy(cmd.args[cmd.numberOfArgs - 1], token);
+                cmd.args[cmd.numberOfArgs] = NULL;
+
             }
             else if (token[0] == '<' && strlen(token) == 1) {
                 token = strtok(NULL, NOT_ALPHA);
-                printf("we made it: %s\n", token);
-
+                cmd.inputFile = malloc(sizeof (char) * (strlen(token) + 1));
+                strcpy(cmd.inputFile, token);
             }
-            else if (token[0] == '>') {
+            else if (token[0] == '>' && strlen(token) == 1) {
+                token = strtok(NULL, NOT_ALPHA);
+                cmd.outputFile = malloc(sizeof (char) * (strlen(token) + 1));
+                strcpy(cmd.outputFile, token);
             }
             else if (token[0] == '&') {
-
+                token = strtok(NULL, NOT_ALPHA);
+                if (token == NULL)
+                    cmd.runInBackground = true;
             }
             else {
                 break;
@@ -225,45 +220,62 @@ void handleUserInput(struct Command cmd) {
     else if (checkForStatus(cmd.name)) {
         printf("exit value %d\n", lastExitStatus);
     }
-//    else if(!cmd.isComment) { // handle all other scenarios that are not comments.
-//        pid_t pid = fork();
-//        if (pid == -1) { // checking if the fork failed before using
-//            perror("fork");
-//            return;
-//        }
-//        else if (pid == 0) { // child proccess
-//            char* filePathToCommand = getCommandFilePath(cmd.name);
-//            cmd.commandFilePath = filePathToCommand;
-//            printf("filePathToCommand: %s\n", filePathToCommand);
-//            cmd.args = malloc(sizeof(char*) * (3));
-//            cmd.args[0] = malloc(sizeof(char) * strlen(cmd.commandFilePath) + 1);
-//            strcpy(cmd.args[0], cmd.commandFilePath);
-//            if (execv(cmd.commandFilePath, cmd.args) == -1) {
-//                if (errno == ENOENT) { // checking if errno equals "no such directory entry"
-//                    printf("Error: Command not found: %s\n", cmd.name);
-//                    exit(EXIT_FAILURE);
-//                }
-//                printf("Error in execv\n");
-//                perror("execv\n"); // printing the error.
-//                exit(EXIT_FAILURE);
-//            }
-//            exit(EXIT_SUCCESS);
-//        }
-//        else { // parent process
-//            int status;
-//            if (waitpid(pid, &status, 0) == -1) { // outputting the error of waitpid before using it
-//                perror("waitpid");
-//            } // wait for the child process to finish
-//            if (WEXITSTATUS(status) == EXIT_FAILURE) {
-//                lastExitStatus = 1; // setting the last exit status to the child exit status.
-//            }
-//            else {
-//                lastExitStatus = 0;
-//            }
-//        }
-//    }
+    else if(!cmd.isComment) { // handle all other scenarios that are not comments.
+        pid_t pid = fork();
+        if (pid == -1) { // checking if the fork failed before using
+            perror("fork");
+            return;
+        }
+        else if (pid == 0) { // child proccess
+            printf("In child Process\n");
+            char* filePathToCommand = getCommandFilePath(cmd.name);
+            cmd.commandFilePath = filePathToCommand;
+            if (cmd.commandFilePath == NULL) {
+                printf("Error: Command file path is NULL\n");
+                exit(EXIT_FAILURE);
+            }
+            execv(cmd.commandFilePath, cmd.args);
+            printf("Error in execv\n");
+            perror("execv\n");
+            exit(EXIT_FAILURE);
+        }
+        else { // parent process
+            printf("In Parent Process\n");
+            int status;
+            if (waitpid(pid, &status, 0) == -1) { // outputting the error of waitpid before using it
+                perror("waitpid");
+            } // wait for the child process to finish
+            if (WIFEXITED(status)) { // ensuring that the child exited normally
+                if (WEXITSTATUS(status) == EXIT_FAILURE) {
+                    lastExitStatus = 1; // setting the last exit status to the child exit status.
+                }
+                else {
+                    lastExitStatus = 0;
+                }
+            }
+            else { // if the child didn't exit normally, set exit status to 1
+                lastExitStatus = 1;
+            }
+        }
+    }
 } // end of "handleUserInput" function
 
+
+void printCommandStructContents(struct Command cmd) {
+    printf("name: %s\n", cmd.name);
+    printf("args: ");
+    for (int i = 0; cmd.args[i] != NULL; i++) {
+        printf("%s  ", cmd.args[i]);
+    }
+    printf("\nnumberOfArgs: %d\n", cmd.numberOfArgs);
+    printf("inputFile: %s\n", cmd.inputFile);
+    printf("outputFile: %s\n", cmd.outputFile);
+    printf("runInBackground: %d\n", cmd.runInBackground);
+    printf("cdFilePath: %s\n", cmd.cdFilePath);
+    printf("isCd: %d\n", cmd.isCd);
+    printf("isComment: %d\n", cmd.isComment);
+    printf("commandFilePath: %s\n", cmd.commandFilePath);
+}
 
 int main() {
     home = getenv("HOME");
