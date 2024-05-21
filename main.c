@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <sys/wait.h>
 #include <stdio.h>
@@ -227,20 +228,51 @@ void handleUserInput(struct Command cmd) {
             return;
         }
         else if (pid == 0) { // child proccess
-            printf("In child Process\n");
             char* filePathToCommand = getCommandFilePath(cmd.name);
             cmd.commandFilePath = filePathToCommand;
             if (cmd.commandFilePath == NULL) {
                 printf("Error: Command file path is NULL\n");
                 exit(EXIT_FAILURE);
             }
+
+            if (cmd.inputFile != NULL) { // redirecting the input to a file.
+                int inputFile = open(cmd.inputFile, O_RDONLY); // opening file as read only
+                if (inputFile != -1) { // error handling for input file
+                    perror("open");
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(inputFile, STDIN_FILENO) == -1) { // redirecting input as the file and error handling
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                if (close(inputFile) == -1) { // error handling close
+                    perror("close");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            if (cmd.outputFile != NULL) { // redirecting the output to a file
+                int outputFile = open(cmd.outputFile, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); // creating file if it doesn't exist and truncating if it does. also assigning read and write permissions to owner.
+                if (outputFile == -1) { // checking that the open is successful before using it. Exiting it not.
+                    perror("open");
+                    exit(EXIT_FAILURE);
+                }
+                if (dup2(outputFile, STDOUT_FILENO) == -1) { // calling dup2 and error handling
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                if (close(outputFile) == -1) {
+                    perror("close");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
             execv(cmd.commandFilePath, cmd.args);
             printf("Error in execv\n");
             perror("execv\n");
             exit(EXIT_FAILURE);
         }
         else { // parent process
-            printf("In Parent Process\n");
             int status;
             if (waitpid(pid, &status, 0) == -1) { // outputting the error of waitpid before using it
                 perror("waitpid");
