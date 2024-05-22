@@ -66,7 +66,6 @@ void freeStructMemory(struct Command cmd) { // freeing all the memory associated
 } // end of "freeStructMemory" function
 
 
-
 char* getCommandFilePath(char* command) {
     char* path = getenv("PATH");
     if (path == NULL) { // handling an error case before using path
@@ -87,7 +86,6 @@ char* getCommandFilePath(char* command) {
         }
         token = strtok(NULL, delim);
     }
-
     fprintf(stderr, "Error: Command '%s' not found\n", command); // if file path is not available, output error message
     fflush(stdout);
     free(fullPath); // free allocated memory
@@ -122,17 +120,16 @@ void killForegroundProcess(int signum) { // function for killing the foreground 
 } // end of "killForegroundProcess" function
 
 
-void signalStop(int signum) {
-    if (foregroundProcess == -1) { // no foreground process is being run
-        if (foregroundModeOnly == true) {
-            printf("Entering foreground-only mode (& is now ignored)\n");
-            foregroundModeOnly = true;
-        }
-        else {
-            printf("Exiting foreground-only mode\n");
-            foregroundModeOnly = false;
-        }
+void signalStop() {
+    if (!foregroundModeOnly) { // if foreground mode is true
+        printf("\nEntering foreground-only mode (& is now ignored)\n"); // print to the user
+        foregroundModeOnly = true; // set the foreground mode to false
     }
+    else { // if foreground mode is false
+        printf("\nExiting foreground-only mode\n"); // print to the user
+        foregroundModeOnly = false; // set foreground mode to true
+    }
+    fflush(stdout); // flushing the standard out to ensure print out occurs
 } // end of "signalStop" function
 
 
@@ -226,6 +223,43 @@ void changeDirectory(char* path) {
     }
 } // end of "changeDirectory" function
 
+
+void replace$$WithPid(char* userInput) {
+    bool pidAdded = false;
+    char* userInputCopy = strdup(userInput); // creating a copy as to not mess with userInput before desired
+    char pidString[20]; // creating a string to store the pid in
+    int pidValue = getpid(); // gettign the pid
+    sprintf(pidString, "%d", pidValue); // converting pidValue to a string
+    char* newString = malloc(sizeof (char) * (strlen(userInputCopy) + strlen(pidString) + 1)); // allocating mem to newString
+    if (newString == NULL) { // handlding the error in case malloc of newString doesn't work
+        perror("malloc");
+        free(userInputCopy); // freeing the mem to ensure no seg faults.
+        return;
+    }
+    int j = 0; // index for new string
+    for (int i = 0; userInputCopy[i] != '\0'; i++) {
+        if (userInputCopy[i] == '$' && userInputCopy[i+1] == '$') {
+            pidAdded = true;
+            strcat(newString, pidString); // adding pidString to newString
+            j += strlen(pidString); // updating the index for new string
+            j += 1; // skipping the second '$'
+            if (userInputCopy[++i] == '\0') { // iterating i to skip the second $ but if it is the null terminator, break the loop.
+                break;
+            }
+        }
+        else {
+            newString[j++] = userInputCopy[i]; // copying char from userInput copy
+        }
+    } // end of for loop
+    newString[j] = '\0'; // add null term to end of new string
+    if (pidAdded) { // only copy the newString into the userInput if pid is added
+        strcpy(userInput, newString); // copying the userInput as the new string. This will directly change the buffer in the parent function to reflect the updated userInput
+    }
+    free(newString); // freeing mem to ensure no seg faults.
+    free(userInputCopy); // freeing mem to ensure no seg faults.
+} // end of "replace$$WithPid" function
+
+
 struct Command getUserInput() {
     if (numberOfBackgroundProcesses > 0) { // checking if there were any processes that finished since the last input.
         checkOnBackgroundProcesses();
@@ -242,6 +276,7 @@ struct Command getUserInput() {
     if (buffer[0] == '\0') { // if the user input nothing, return cmd empty and give the user a new output
         return cmd;
     }
+    replace$$WithPid(buffer);
     cmd.name = malloc(sizeof(char) * 15); // allocating 15 characters to the name.
     if (checkForCD(buffer)) { // checking if the cd command was in the buffer
         strcpy(cmd.name, "cd");
@@ -468,6 +503,8 @@ int main() {
     home = getenv("HOME"); // setting the home variable for use
     currentWorkingDirectory = malloc(sizeof(char) * (MAX_PATH_LENGTH + 1)); // allocating memory for current working directory.
     getcwd(currentWorkingDirectory, sizeof(currentWorkingDirectory)); // setting the working directory to the initial directory tha the file is stored in.
+
+    printf("pid: %ul\n", getpid());
 
     signal(SIGINT, killForegroundProcess); // Set up SIGINT signal handler
     signal(SIGTSTP, signalStop); // set up SIGTSTP signal handler
