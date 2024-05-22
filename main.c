@@ -37,6 +37,7 @@ struct Command {
     bool runInBackground; // this boolean tracks if the command is to be run in the background or not
     bool isCd; // if we encounter a cd command, we are storing a boolean to say so
     bool isComment; // if we encounter a comment, we are marking that because it's a special case (we are to ignore it)
+    bool isEcho;
 }; // end of "Command" struct
 
 
@@ -61,9 +62,6 @@ void freeStructMemory(struct Command cmd) { // freeing all the memory associated
     }
     if (cmd.commandFilePath != NULL) { // if it is null, then memory was never allocated to it.
         free(cmd.commandFilePath); // free the commandFilePath
-    }
-    if (cmd.echoContents != NULL) { // if echoContents has mem allocated to it
-        free(cmd.echoContents); // free the echoContents
     }
 } // end of "freeStructMemory" function
 
@@ -178,7 +176,8 @@ void checkOnBackgroundProcesses() {
         int j = 0; // initalizing an index j
         for (int i = 0; i < numberOfBackgroundProcesses; i++) { // running a loop that reorders the array removing pid's that have been marked for termination.
             if (backgroundProcesses[i] != -1) { // if the pid was not terminated, move it up in the array
-                backgroundProcesses[j++] = backgroundProcesses[i]; // if the backgroundProcesses was not terminated, tack it onto the jth spot in the array; when backgroundProcesses[i] was terminated, i iterates but j does not, and backgroundProcesses[i] ends up being overridden with a value one
+                backgroundProcesses[j] = backgroundProcesses[i]; // if the backgroundProcesses was not terminated, tack it onto the jth spot in the array; when backgroundProcesses[i] was terminated, i iterates but j does not, and backgroundProcesses[i] ends up being overridden with a value one
+                j++;
             }
         } // end of for loop
         numberOfBackgroundProcesses = j; // updating the amount of background processes that are active in the array.
@@ -201,7 +200,7 @@ bool checkForEcho(char* userInput) {
 
 
 bool checkForCD(const char* userInput) { // this function reads the command and checks if it is 'cd'
-    if (userInput[0] == 'c' && userInput[1] == 'd' && (strlen(userInput) == 2 || userInput[2] == ' ')) { // if the first two letters of the user input is cd then this is a cd command. We also check to ensure that the userInput length is 2 or (if it's not length of 2) that the third character is a space, indicating that the userInput is 'cd xxxx'
+    if (userInput[0] == 'c' && userInput[1] == 'd') { // if the first two letters of the user input is cd then this is a cd command. We also check to ensure that the userInput length is 2 or (if it's not length of 2) that the third character is a space, indicating that the userInput is 'cd xxxx'
         return true; // this is reached if the userInput is a cd command, so return true
     }
     else {
@@ -318,6 +317,7 @@ struct Command getUserInput() {
         strcpy(cmd.name, token);
     }
     else if (checkForEcho(buffer)) { // handling the case of an echo. This is a special case
+        cmd.isEcho = true;
         cmd.args = malloc(sizeof(char*) * (MAX_NUM_ARGS + 1)); // allocating the proper memory amount to args.
         cmd.name = malloc(sizeof(char) + (strlen("echo") + 1)); // allocating space to the name
         cmd.echoContents = malloc(sizeof(char) * (strlen(buffer) - 4)); // allocating mem to the echoContents
@@ -367,7 +367,7 @@ struct Command getUserInput() {
                 cmd.outputFile = malloc(sizeof (char) * (strlen(token) + 1)); // allocate memory to the output file
                 strcpy(cmd.outputFile, token); // copy the token into the cmd's output file location
             }
-            else if (token[0] == '&' && strlen(token) == 1) { // if the only thing in the tokne is '&' it means that we are going to run this command in the background
+            else if (token[0] == '&') { // if the only thing in the token is '&' it means that we are going to run this command in the background
                 token = strtok(NULL, NOT_ALPHA); // iterate the token to ensure that we are at the end of the buffer
                 if (token == NULL) // ensure that we are at the end of the buffer
                     cmd.runInBackground = true; // set the runInBackground to true
@@ -494,8 +494,7 @@ void handleUserInput(struct Command cmd) { // once the cmd is populated correctl
                 }
             }
             execv(cmd.commandFilePath, cmd.args); // calling execv to run non standard command
-            printf("Error in execv\n"); // outputting errors if the function returns.
-            perror("execv\n");
+            perror("execv"); // outputting errors if the function returns.
             fflush(stdout);
             exit(EXIT_FAILURE); // sending an error back
         }
