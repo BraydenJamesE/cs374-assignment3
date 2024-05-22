@@ -27,18 +27,35 @@ char currentWorkingDirectory[MAX_PATH_LENGTH]; // storing a variable that holds 
 struct Command {
     char* name; // this holds the command
     char** args;
-    int numberOfArgs;
     char* inputFile;
     char* outputFile;
-    bool runInBackground;
     char* cdFilePath;
+    char* commandFilePath;
+    int numberOfArgs;
+    bool runInBackground;
     bool isCd;
     bool isComment;
-    char* commandFilePath;
 };
 
 void freeStructMemory(struct Command *cmd) { // freeing all the memory associated with the struct.
-    free(cmd->name);
+    if (cmd->name != NULL) {
+        free(cmd->name);
+    }
+    if (cmd->args != NULL) {
+        for (int i = 0; cmd->args[i] != NULL; i++) {
+            free(cmd->args[i]);
+        }
+        free(cmd->args);
+    }
+    if (cmd->inputFile != NULL) {
+        free(cmd->inputFile);
+    }
+    if (cmd->outputFile != NULL) {
+        free(cmd->outputFile);
+    }
+    if (cmd->cdFilePath != NULL) {
+        free(cmd->cdFilePath);
+    }
     if (cmd->commandFilePath != NULL) { // if it is null, then memory was never allocated to it.
         free(cmd->commandFilePath);
     }
@@ -49,6 +66,7 @@ char* getCommandFilePath(char* command) {
     char* path = getenv("PATH");
     if (path == NULL) { // handling an error case before using path
         fprintf(stderr, "Path variable not available\n");
+        fflush(stdout);
         return NULL;
     }
     char* delim = ":"; // separating each segment of the path by its delimiter.
@@ -57,6 +75,7 @@ char* getCommandFilePath(char* command) {
 
     while (token != NULL) {
         snprintf(fullPath, 200, "%s/%s", token, command);
+        fflush(stdout);
 
         if (access(fullPath, X_OK) != -1) {
             return fullPath; // allocating memory to be returned.
@@ -65,6 +84,7 @@ char* getCommandFilePath(char* command) {
     }
 
     fprintf(stderr, "Error: Command '%s' not found\n", command); // if file path is not available, output error message
+    fflush(stdout);
     free(fullPath); // free allocated memory
     exit(EXIT_FAILURE); // send exit status of 1
 } // end of "getCommandFilePath" function
@@ -72,12 +92,14 @@ char* getCommandFilePath(char* command) {
 
 void killBackgroundProcesses() {
     printf("Number of background processes: %d \n", numberOfBackgroundProcesses);
+    fflush(stdout);
     for (int i = 0; i < numberOfBackgroundProcesses; i++) {
         kill(backgroundProcesses[i], SIGTERM); // terminating all background processes.
     }
     for (int i = 0; i < numberOfBackgroundProcesses; i++) { // waiting for all proccesses to close.
         waitpid(backgroundProcesses[i], NULL, 0);
         printf("Background process with PID %d has exited\n", backgroundProcesses[i]);
+        fflush(stdout);
     }
     numberOfBackgroundProcesses = 0;
 } // end of "killBackgroundProcesses" function
@@ -109,6 +131,8 @@ void checkOnBackgroundProcesses() {
             else {
                 lastExitStatus = 1;
             }
+            printf("Background pid %d is done: exit value %d\n", backgroundProcesses[i], lastExitStatus);
+            fflush(stdout);
             backgroundProcesses[i] = -1; // doing this so that it can be removed from the array
             numOfBackgroundProcessesTerminated += 1; // if this value is greater than 0, we must reorder the array.
         }
@@ -159,24 +183,27 @@ void changeDirectory(char* path) {
     char* pathCopy = strdup(path); // creating a copy to avoid editing the original value
     if (chdir(pathCopy) != 0) {
         fprintf(stderr, "%s\n", strerror(errno));
+        fflush(stdout);
     }
     else {
         strcpy(currentWorkingDirectory, pathCopy);
     }
 } // end of "changeDirectory" function
 
-
-
-
 struct Command getUserInput() {
     struct Command cmd = {0};
     char buffer[MAX_CHAR_LENGTH];
     char* token;
     printf(": ");
-    fgets(buffer, sizeof(buffer), stdin);
+    fflush(stdout);
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL) { // if there was an error with fgets, just return an new output to the user
+        return cmd;
+    }
     buffer[strcspn(buffer, "\n")] = '\0'; // scan buffer until it finds the newline char and replace it with null terminator.
+    if (buffer[0] == '\0') { // if the user input nothing, return cmd empty and give the user a new output
+        return cmd;
+    }
     cmd.name = malloc(sizeof(char) * 15); // allocating 15 characters to the name.
-
     if (checkForCD(buffer)) { // checking if the cd command was in the buffer
         strcpy(cmd.name, "cd");
         token = strtok(buffer + 3, NOT_ALPHA); // getting the file path.
@@ -198,6 +225,7 @@ struct Command getUserInput() {
         token = strtok(buffer, NOT_ALPHA);
         if (token == NULL) {
             fprintf(stderr, "No command found\n");
+            fflush(stdout);
             exit(EXIT_FAILURE);
         }
         strcpy(cmd.name, token); // getting the command
@@ -269,6 +297,7 @@ void handleUserInput(struct Command cmd) {
     }
     else if (checkForStatus(cmd.name)) {
         printf("exit value %d\n", lastExitStatus);
+        fflush(stdout);
     }
     else if(!cmd.isComment) { // handle all other scenarios that are not comments.
         pid_t pid = fork();
@@ -281,6 +310,7 @@ void handleUserInput(struct Command cmd) {
             cmd.commandFilePath = filePathToCommand;
             if (cmd.commandFilePath == NULL) {
                 printf("Error: Command file path is NULL\n");
+                fflush(stdout);
                 exit(EXIT_FAILURE);
             }
 
@@ -350,7 +380,9 @@ void handleUserInput(struct Command cmd) {
             }
             execv(cmd.commandFilePath, cmd.args);
             printf("Error in execv\n");
+            fflush(stdout);
             perror("execv\n");
+            fflush(stdout);
             exit(EXIT_FAILURE);
         }
         else { // parent process
@@ -373,6 +405,8 @@ void handleUserInput(struct Command cmd) {
             }
             else {
                 backgroundProcesses[numberOfBackgroundProcesses] = pid;
+                printf("background pid is %d\n", pid);
+                fflush(stdout);
                 numberOfBackgroundProcesses += 1;
             }
         }
@@ -382,18 +416,29 @@ void handleUserInput(struct Command cmd) {
 
 void printCommandStructContents(struct Command cmd) {
     printf("name: %s\n", cmd.name);
+    fflush(stdout);
     printf("args: ");
+    fflush(stdout);
     for (int i = 0; cmd.args[i] != NULL; i++) {
         printf("%s  ", cmd.args[i]);
+        fflush(stdout);
     }
     printf("\nnumberOfArgs: %d\n", cmd.numberOfArgs);
+    fflush(stdout);
     printf("inputFile: %s\n", cmd.inputFile);
+    fflush(stdout);
     printf("outputFile: %s\n", cmd.outputFile);
+    fflush(stdout);
     printf("runInBackground: %d\n", cmd.runInBackground);
+    fflush(stdout);
     printf("cdFilePath: %s\n", cmd.cdFilePath);
+    fflush(stdout);
     printf("isCd: %d\n", cmd.isCd);
+    fflush(stdout);
     printf("isComment: %d\n", cmd.isComment);
+    fflush(stdout);
     printf("commandFilePath: %s\n", cmd.commandFilePath);
+    fflush(stdout);
 }
 
 int main() {
@@ -402,7 +447,7 @@ int main() {
 
     while (true) {
         struct Command cmd = getUserInput();
-        if (!cmd.isComment) { // only handle the command if it's not a comment. If it is a comment, ignore it.
+        if (cmd.name != NULL && !cmd.isComment) { // only handle the command if it's not a comment and the cmd was not null indicating that nothing was entered by the user. If it is a comment, ignore it.
             handleUserInput(cmd);
         }
         freeStructMemory(&cmd);
