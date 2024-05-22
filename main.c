@@ -17,12 +17,15 @@
 #define COMMENT_NAME "Comment"
 
 pid_t backgroundProcesses[1000];
+pid_t foregroundProcess = -1; // creating a forground process variable
 int numberOfBackgroundProcesses = 0;
 int lastExitStatus = 0;
+int lastSignalStatus = 0;
 char* home; // this variable will hold the home directory.
 
-char currentWorkingDirectory[MAX_PATH_LENGTH]; // storing a variable that holds the value of the current working directory. This variable is set to the current working directory at the start of the program.
+char* currentWorkingDirectory; // storing a variable that holds the value of the current working directory. This variable is set to the current working directory at the start of the program.
 
+bool lastStatusWasSignal = false;
 
 struct Command {
     char* name; // this holds the command
@@ -37,29 +40,30 @@ struct Command {
     bool isComment;
 };
 
-void freeStructMemory(struct Command *cmd) { // freeing all the memory associated with the struct.
-    if (cmd->name != NULL) {
-        free(cmd->name);
+void freeStructMemory(struct Command cmd) { // freeing all the memory associated with the struct.
+    if (cmd.name != NULL) {
+        free(cmd.name);
     }
-    if (cmd->args != NULL) {
-        for (int i = 0; cmd->args[i] != NULL; i++) {
-            free(cmd->args[i]);
+    if (cmd.args != NULL) {
+        for (int i = 0; cmd.args[i] != NULL; i++) {
+            free(cmd.args[i]);
         }
-        free(cmd->args);
+        free(cmd.args);
     }
-    if (cmd->inputFile != NULL) {
-        free(cmd->inputFile);
+    if (cmd.inputFile != NULL) {
+        free(cmd.inputFile);
     }
-    if (cmd->outputFile != NULL) {
-        free(cmd->outputFile);
+    if (cmd.outputFile != NULL) {
+        free(cmd.outputFile);
     }
-    if (cmd->cdFilePath != NULL) {
-        free(cmd->cdFilePath);
+    if (cmd.cdFilePath != NULL) {
+        free(cmd.cdFilePath);
     }
-    if (cmd->commandFilePath != NULL) { // if it is null, then memory was never allocated to it.
-        free(cmd->commandFilePath);
+    if (cmd.commandFilePath != NULL) { // if it is null, then memory was never allocated to it.
+        free(cmd.commandFilePath);
     }
 } // end of "freeStructMemory" function
+
 
 
 char* getCommandFilePath(char* command) {
@@ -103,6 +107,18 @@ void killBackgroundProcesses() {
     }
     numberOfBackgroundProcesses = 0;
 } // end of "killBackgroundProcesses" function
+
+
+void killForegroundProcess(int signum) { // function for killing the foreground process
+    if (foregroundProcess != -1) { // ensuring that the foreground process is running
+        kill(foregroundProcess, SIGINT); // killing the foreground process with sigint
+    }
+    printf("terminated by signal %d\n", signum); // outputting to the user.
+    fflush(stdout);
+    lastStatusWasSignal = true;
+    lastSignalStatus = signum;
+    foregroundProcess = -1;
+} // end of "killForegroundProcess" function
 
 
 void checkOnBackgroundProcesses() {
@@ -168,6 +184,7 @@ bool checkForCD(const char* userInput) { // this function reads the command and 
 bool checkForExit(char* userInput) { // this function reads the command and checks if it is 'exit'
     char* userInputCopy = strdup(userInput); // creating a copy to avoid editing the original value
     char* token = strtok(userInputCopy, NOT_ALPHA);
+    free(userInputCopy);
     return strcmp(token, "exit") == 0;
 } // end of "checkForExit" function
 
@@ -175,22 +192,29 @@ bool checkForExit(char* userInput) { // this function reads the command and chec
 bool checkForStatus(char* userInput) { // this function reads the command and checks if it is 'status'
     char* userInputCopy = strdup(userInput); // creating a copy to avoid editing the original value
     char* token = strtok(userInputCopy, NOT_ALPHA);
+    free(userInputCopy);
     return strcmp(token, "status") == 0;
 } // end of "checkForStatus" function
 
 
 void changeDirectory(char* path) {
     char* pathCopy = strdup(path); // creating a copy to avoid editing the original value
-    if (chdir(pathCopy) != 0) {
-        fprintf(stderr, "%s\n", strerror(errno));
-        fflush(stdout);
-    }
-    else {
-        strcpy(currentWorkingDirectory, pathCopy);
+    if (pathCopy != NULL) {
+        if (chdir(pathCopy) != 0) {
+            perror("chdir");
+            free(pathCopy);
+            fflush(stdout);
+        } else {
+            strcpy(currentWorkingDirectory, pathCopy);
+            free(pathCopy);
+        }
     }
 } // end of "changeDirectory" function
 
 struct Command getUserInput() {
+    if (numberOfBackgroundProcesses > 0) { // checking if there were any processes that finished since the last input.
+        checkOnBackgroundProcesses();
+    }
     struct Command cmd = {0};
     char buffer[MAX_CHAR_LENGTH];
     char* token;
@@ -208,7 +232,10 @@ struct Command getUserInput() {
         strcpy(cmd.name, "cd");
         token = strtok(buffer + 3, NOT_ALPHA); // getting the file path.
         cmd.isCd = true;
-        cmd.cdFilePath = token;
+        if (token != NULL) {
+            cmd.cdFilePath = malloc(sizeof(char) * (strlen(token) + 1));
+            strcpy(cmd.cdFilePath, token);
+        }
     }
     else if (checkForComment(buffer[0])) { // checking if the user inputted a comment
         cmd.isComment = true;
@@ -277,10 +304,6 @@ struct Command getUserInput() {
 
 
 void handleUserInput(struct Command cmd) {
-    if (numberOfBackgroundProcesses > 0) { // checking if there were any processes that finished since the last input.
-        checkOnBackgroundProcesses();
-    }
-
     if (cmd.isCd) {
         if (cmd.cdFilePath == NULL) { // handling the case where the user didn't pass a filepath with cd command.
             changeDirectory(home);
@@ -293,13 +316,21 @@ void handleUserInput(struct Command cmd) {
         if (numberOfBackgroundProcesses > 0) {
             killBackgroundProcesses();
         }
+        free(currentWorkingDirectory);
         exit(EXIT_SUCCESS); // exiting the program
     }
     else if (checkForStatus(cmd.name)) {
-        printf("exit value %d\n", lastExitStatus);
-        fflush(stdout);
+        if (lastStatusWasSignal) {
+            printf("terminated by signal %d\n", lastSignalStatus);
+            fflush(stdout);
+        }
+        else {
+            printf("exit value %d\n", lastExitStatus);
+            fflush(stdout);
+        }
     }
     else if(!cmd.isComment) { // handle all other scenarios that are not comments.
+        lastStatusWasSignal = false;
         pid_t pid = fork();
         if (pid == -1) { // checking if the fork failed before using
             perror("fork");
@@ -388,7 +419,8 @@ void handleUserInput(struct Command cmd) {
         else { // parent process
             int status;
             if (!cmd.runInBackground) {
-                if (waitpid(pid, &status, 0) == -1) { // outputting the error of waitpid before using it
+                foregroundProcess = pid;
+                if (waitpid(foregroundProcess, &status, 0) == -1) { // outputting the error of waitpid before using it
                     perror("waitpid");
                 } // wait for the child process to finish
                 if (WIFEXITED(status)) { // ensuring that the child exited normally
@@ -443,13 +475,16 @@ void printCommandStructContents(struct Command cmd) {
 
 int main() {
     home = getenv("HOME");
+    currentWorkingDirectory = malloc(sizeof(char) * (MAX_PATH_LENGTH + 1));
     getcwd(currentWorkingDirectory, sizeof(currentWorkingDirectory)); // setting the working directory to the initial directory tha the file is stored in.
+
+    signal(SIGINT, killForegroundProcess); // Set up SIGINT signal handler
 
     while (true) {
         struct Command cmd = getUserInput();
         if (cmd.name != NULL && !cmd.isComment) { // only handle the command if it's not a comment and the cmd was not null indicating that nothing was entered by the user. If it is a comment, ignore it.
             handleUserInput(cmd);
         }
-        freeStructMemory(&cmd);
+        freeStructMemory(cmd);
     } // end of while loop
 }
