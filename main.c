@@ -27,6 +27,7 @@ char* currentWorkingDirectory; // storing a variable that holds the value of the
 bool lastStatusWasSignal = false;
 bool foregroundModeOnly = false;
 
+
 struct Command {
     char* name; // this holds the command
     char** args;
@@ -34,11 +35,14 @@ struct Command {
     char* outputFile;
     char* cdFilePath;
     char* commandFilePath;
+    char* echoContents;
     int numberOfArgs;
     bool runInBackground;
     bool isCd;
     bool isComment;
+    bool isEcho;
 };
+
 
 void freeStructMemory(struct Command cmd) { // freeing all the memory associated with the struct.
     if (cmd.name != NULL) {
@@ -180,6 +184,15 @@ bool checkForComment(char firstLetterOfUserInput) {
 } // end of "checkForComment" function
 
 
+bool checkForEcho(char* userInput) {
+    char* userInputCopy = strdup(userInput);
+    char* token = strtok(userInputCopy, " ");
+    bool returnValue = strcmp(token, "echo") == 0;
+    free(userInputCopy);
+    return returnValue;
+} // end of "checkForEcho" function
+
+
 bool checkForCD(const char* userInput) { // this function reads the command and checks if it is 'cd'
     if (userInput[0] == 'c' && userInput[1] == 'd') {
         return true;
@@ -297,6 +310,19 @@ struct Command getUserInput() {
         token = strtok(buffer, NOT_ALPHA);
         strcpy(cmd.name, token);
     }
+    else if (checkForEcho(buffer)) {
+        cmd.isEcho = true;
+        cmd.args = malloc(sizeof(char*) * (MAX_NUM_ARGS + 1)); // allocating the proper memory amount to args.
+        cmd.name = malloc(sizeof(char) + (strlen("echo") + 1));
+        cmd.echoContents = malloc(sizeof(char) * (strlen(buffer) - 4));
+        strcpy(cmd.name, "echo");
+        strcpy(cmd.echoContents, buffer + 5);
+        cmd.args[0] = malloc(sizeof(char) * (strlen(cmd.name) + 1));
+        cmd.args[1] = malloc(sizeof(char) * (strlen(cmd.echoContents) + 1)); // allocating mem to args to have the echo
+        strcpy(cmd.args[0], cmd.name);
+        strcpy(cmd.args[1], cmd.echoContents); // putting the echo contents in the args
+        cmd.args[2] = NULL;
+    }
     else { // commands other than standard (exit, cd, & status) and comment.
         token = strtok(buffer, NOT_ALPHA);
         if (token == NULL) {
@@ -305,7 +331,6 @@ struct Command getUserInput() {
             exit(EXIT_FAILURE);
         }
         strcpy(cmd.name, token); // getting the command
-        int avoidInfLoopIndex = 0;
         cmd.numberOfArgs = 0; // setting the number of commands to 0 for use in loop.
         cmd.args = malloc(sizeof(char*) * (MAX_NUM_ARGS + 1)); // allocating the proper memory amount to args.
         while (true) {
@@ -368,6 +393,7 @@ void handleUserInput(struct Command cmd) {
         exit(EXIT_SUCCESS); // exiting the program
     }
     else if (checkForStatus(cmd.name)) { // call checkForStatus function to see if the status command was called
+        printf("Sending status: Run in Background? %d\n", cmd.runInBackground);
         if (lastStatusWasSignal) { // if the last exit was a signal
             printf("terminated by signal %d\n", lastSignalStatus); // output the last signal status
             fflush(stdout);
