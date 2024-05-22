@@ -98,10 +98,19 @@ char* getCommandFilePath(char* command) {
 
 void killBackgroundProcesses() {
     for (int i = 0; i < numberOfBackgroundProcesses; i++) {
-        kill(backgroundProcesses[i], SIGTERM); // terminating all background processes.
+        kill(backgroundProcesses[i], SIGTERM); // terminating all background processes and storing the result
     }
     for (int i = 0; i < numberOfBackgroundProcesses; i++) { // waiting for all proccesses to close.
-        waitpid(backgroundProcesses[i], NULL, 0);
+        int status = 0;
+        waitpid(backgroundProcesses[i], &status, 0);
+        if (WIFEXITED(status)) {
+            lastStatusWasSignal = false;
+            lastExitStatus = WEXITSTATUS(status);
+        }
+        else if (WIFSIGNALED(status)) {
+            lastStatusWasSignal = true;
+            lastSignalStatus =  WTERMSIG(status);
+        }
         printf("Background process with PID %d has exited\n", backgroundProcesses[i]);
         fflush(stdout);
     }
@@ -149,18 +158,20 @@ void checkOnBackgroundProcesses() {
         }
         else {
             if (WIFEXITED(status)) {
-                int exitStatus = WEXITSTATUS(status);
-                if (exitStatus == EXIT_FAILURE) {
-                    lastExitStatus = 1;
-                }
-                else {
-                    lastExitStatus = 0;
-                }
+                lastStatusWasSignal = false;
+                lastExitStatus = WEXITSTATUS(status);
+            }
+            else if (WIFSIGNALED(status)) {
+                lastStatusWasSignal = true;
+                lastSignalStatus = WTERMSIG(status);
+            }
+
+            if (lastStatusWasSignal) {
+                printf("Background pid %d is done: terminated by signal %d\n", backgroundProcesses[i], lastSignalStatus);
             }
             else {
-                lastExitStatus = 1;
+                printf("Background pid %d is done: exit value %d\n", backgroundProcesses[i], lastExitStatus);
             }
-            printf("Background pid %d is done: exit value %d\n", backgroundProcesses[i], lastExitStatus);
             fflush(stdout);
             backgroundProcesses[i] = -1; // doing this so that it can be removed from the array
             numOfBackgroundProcessesTerminated += 1; // if this value is greater than 0, we must reorder the array.
@@ -393,7 +404,6 @@ void handleUserInput(struct Command cmd) {
         exit(EXIT_SUCCESS); // exiting the program
     }
     else if (checkForStatus(cmd.name)) { // call checkForStatus function to see if the status command was called
-        printf("Sending status: Run in Background? %d\n", cmd.runInBackground);
         if (lastStatusWasSignal) { // if the last exit was a signal
             printf("terminated by signal %d\n", lastSignalStatus); // output the last signal status
             fflush(stdout);
@@ -405,6 +415,9 @@ void handleUserInput(struct Command cmd) {
     }
     else if(!cmd.isComment) { // handle all other scenarios that are not comments.
         lastStatusWasSignal = false;
+        if (strcmp(cmd.name, "pkill") == 0) { // setting the last statuswas signal to true if the user tries to kill the program.
+            lastStatusWasSignal = true;
+        }
         if (foregroundModeOnly == true) { // resetting runInBackground to false for this command.
             cmd.runInBackground = false;
         }
@@ -500,15 +513,12 @@ void handleUserInput(struct Command cmd) {
                     perror("waitpid");
                 } // wait for the child process to finish
                 if (WIFEXITED(status)) { // ensuring that the child exited normally
-                    if (WEXITSTATUS(status) == EXIT_FAILURE) {
-                        lastExitStatus = 1; // setting the last exit status to the child exit status.
-                    }
-                    else {
-                        lastExitStatus = 0;
-                    }
+                    lastStatusWasSignal = false;
+                    lastExitStatus = WIFEXITED(status);
                 }
-                else { // if the child didn't exit normally, set exit status to 1
-                    lastExitStatus = 1;
+                else if (WIFSIGNALED(status)) { // if the child didn't exit normally, set exit status to 1
+                    lastStatusWasSignal = true;
+                    lastSignalStatus = WIFSIGNALED(status);
                 }
             }
             else {
