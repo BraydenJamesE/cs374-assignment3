@@ -11,7 +11,6 @@
 #define MAX_CHAR_LENGTH 2049
 #define MAX_PATH_LENGTH 1024
 #define MAX_NUM_ARGS 512
-#define MAX_COMMAND_SIZE 100
 #define NOT_ALPHA " \t\n\0"
 #define EXIT_NAME "exit"
 #define COMMENT_NAME "Comment"
@@ -94,8 +93,6 @@ char* getCommandFilePath(char* command) {
 
 
 void killBackgroundProcesses() {
-    printf("Number of background processes: %d \n", numberOfBackgroundProcesses);
-    fflush(stdout);
     for (int i = 0; i < numberOfBackgroundProcesses; i++) {
         kill(backgroundProcesses[i], SIGTERM); // terminating all background processes.
     }
@@ -196,16 +193,18 @@ bool checkForCD(const char* userInput) { // this function reads the command and 
 bool checkForExit(char* userInput) { // this function reads the command and checks if it is 'exit'
     char* userInputCopy = strdup(userInput); // creating a copy to avoid editing the original value
     char* token = strtok(userInputCopy, NOT_ALPHA);
+    bool returnValue = strcmp(token, "exit") == 0;
     free(userInputCopy);
-    return strcmp(token, "exit") == 0;
+    return returnValue;
 } // end of "checkForExit" function
 
 
 bool checkForStatus(char* userInput) { // this function reads the command and checks if it is 'status'
     char* userInputCopy = strdup(userInput); // creating a copy to avoid editing the original value
     char* token = strtok(userInputCopy, NOT_ALPHA);
+    bool returnValue = strcmp(token, "status") == 0;
     free(userInputCopy);
-    return strcmp(token, "status") == 0;
+    return returnValue;
 } // end of "checkForStatus" function
 
 
@@ -326,7 +325,6 @@ struct Command getUserInput() {
                 cmd.args[cmd.numberOfArgs - 1] = malloc(sizeof(char) * (strlen(token) + 1));
                 strcpy(cmd.args[cmd.numberOfArgs - 1], token);
                 cmd.args[cmd.numberOfArgs] = NULL;
-
             }
             else if (token[0] == '<' && strlen(token) == 1) {
                 token = strtok(NULL, NOT_ALPHA);
@@ -356,26 +354,26 @@ struct Command getUserInput() {
 void handleUserInput(struct Command cmd) {
     if (cmd.isCd) {
         if (cmd.cdFilePath == NULL) { // handling the case where the user didn't pass a filepath with cd command.
-            changeDirectory(home);
+            changeDirectory(home); // calling change directory with home directory
         }
         else {
-            changeDirectory(cmd.cdFilePath);
+            changeDirectory(cmd.cdFilePath); // passing int eh specified directory
         }
     }
-    else if (strcmp(cmd.name, EXIT_NAME) == 0) {
-        if (numberOfBackgroundProcesses > 0) {
-            killBackgroundProcesses();
+    else if (strcmp(cmd.name, EXIT_NAME) == 0) { // if exit is called
+        if (numberOfBackgroundProcesses > 0) { // if there are more background processes than 0
+            killBackgroundProcesses(); // kill backgrond proccesses
         }
-        free(currentWorkingDirectory);
+        free(currentWorkingDirectory); // free the currenting working directory memory
         exit(EXIT_SUCCESS); // exiting the program
     }
-    else if (checkForStatus(cmd.name)) {
-        if (lastStatusWasSignal) {
-            printf("terminated by signal %d\n", lastSignalStatus);
+    else if (checkForStatus(cmd.name)) { // call checkForStatus function to see if the status command was called
+        if (lastStatusWasSignal) { // if the last exit was a signal
+            printf("terminated by signal %d\n", lastSignalStatus); // output the last signal status
             fflush(stdout);
         }
-        else {
-            printf("exit value %d\n", lastExitStatus);
+        else { // if the last status was not a signal
+            printf("exit value %d\n", lastExitStatus); // output the last error status
             fflush(stdout);
         }
     }
@@ -390,9 +388,9 @@ void handleUserInput(struct Command cmd) {
             return;
         }
         else if (pid == 0) { // child proccess
-            char* filePathToCommand = getCommandFilePath(cmd.name);
+            char* filePathToCommand = getCommandFilePath(cmd.name); // calling getCommandFilePath to get the file path for the nonstandard command
             cmd.commandFilePath = filePathToCommand;
-            if (cmd.commandFilePath == NULL) {
+            if (cmd.commandFilePath == NULL) { // if the file path is null, then the command does not exist
                 printf("Error: Command file path is NULL\n");
                 fflush(stdout);
                 exit(EXIT_FAILURE);
@@ -424,7 +422,7 @@ void handleUserInput(struct Command cmd) {
                     perror("dup2");
                     exit(EXIT_FAILURE);
                 }
-                if (close(outputFile) == -1) {
+                if (close(outputFile) == -1) { // calling close and checking for error value
                     perror("close");
                     exit(EXIT_FAILURE);
                 }
@@ -462,12 +460,11 @@ void handleUserInput(struct Command cmd) {
                     }
                 }
             }
-            execv(cmd.commandFilePath, cmd.args);
-            printf("Error in execv\n");
-            fflush(stdout);
+            execv(cmd.commandFilePath, cmd.args); // calling execv to run non standard command
+            printf("Error in execv\n"); // outputting errors if the function returns.
             perror("execv\n");
             fflush(stdout);
-            exit(EXIT_FAILURE);
+            exit(EXIT_FAILURE); // sending an error back
         }
         else { // parent process
             int status;
@@ -489,10 +486,10 @@ void handleUserInput(struct Command cmd) {
                 }
             }
             else {
-                backgroundProcesses[numberOfBackgroundProcesses] = pid;
-                printf("background pid is %d\n", pid);
-                fflush(stdout);
-                numberOfBackgroundProcesses += 1;
+                backgroundProcesses[numberOfBackgroundProcesses] = pid; // putting the pid in teh array
+                numberOfBackgroundProcesses += 1; // increasing the number of background processes becasue pid was added
+                printf("background pid is %d\n", pid); // outputting to the user
+                fflush(stdout); // flushing the stdout
             }
         }
     }
@@ -503,8 +500,6 @@ int main() {
     home = getenv("HOME"); // setting the home variable for use
     currentWorkingDirectory = malloc(sizeof(char) * (MAX_PATH_LENGTH + 1)); // allocating memory for current working directory.
     getcwd(currentWorkingDirectory, sizeof(currentWorkingDirectory)); // setting the working directory to the initial directory tha the file is stored in.
-
-    printf("pid: %ul\n", getpid());
 
     signal(SIGINT, killForegroundProcess); // Set up SIGINT signal handler
     signal(SIGTSTP, signalStop); // set up SIGTSTP signal handler
