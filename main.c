@@ -26,6 +26,7 @@ char* home; // this variable will hold the home directory.
 char* currentWorkingDirectory; // storing a variable that holds the value of the current working directory. This variable is set to the current working directory at the start of the program.
 
 bool lastStatusWasSignal = false;
+bool foregroundModeOnly = false;
 
 struct Command {
     char* name; // this holds the command
@@ -119,6 +120,20 @@ void killForegroundProcess(int signum) { // function for killing the foreground 
     lastSignalStatus = signum;
     foregroundProcess = -1;
 } // end of "killForegroundProcess" function
+
+
+void signalStop(int signum) {
+    if (foregroundProcess == -1) { // no foreground process is being run
+        if (foregroundModeOnly == true) {
+            printf("Entering foreground-only mode (& is now ignored)\n");
+            foregroundModeOnly = true;
+        }
+        else {
+            printf("Exiting foreground-only mode\n");
+            foregroundModeOnly = false;
+        }
+    }
+} // end of "signalStop" function
 
 
 void checkOnBackgroundProcesses() {
@@ -331,7 +346,10 @@ void handleUserInput(struct Command cmd) {
     }
     else if(!cmd.isComment) { // handle all other scenarios that are not comments.
         lastStatusWasSignal = false;
-        pid_t pid = fork();
+        if (foregroundModeOnly == true) { // resetting runInBackground to false for this command.
+            cmd.runInBackground = false;
+        }
+        pid_t pid = fork(); // forking
         if (pid == -1) { // checking if the fork failed before using
             perror("fork");
             return;
@@ -446,45 +464,19 @@ void handleUserInput(struct Command cmd) {
 } // end of "handleUserInput" function
 
 
-void printCommandStructContents(struct Command cmd) {
-    printf("name: %s\n", cmd.name);
-    fflush(stdout);
-    printf("args: ");
-    fflush(stdout);
-    for (int i = 0; cmd.args[i] != NULL; i++) {
-        printf("%s  ", cmd.args[i]);
-        fflush(stdout);
-    }
-    printf("\nnumberOfArgs: %d\n", cmd.numberOfArgs);
-    fflush(stdout);
-    printf("inputFile: %s\n", cmd.inputFile);
-    fflush(stdout);
-    printf("outputFile: %s\n", cmd.outputFile);
-    fflush(stdout);
-    printf("runInBackground: %d\n", cmd.runInBackground);
-    fflush(stdout);
-    printf("cdFilePath: %s\n", cmd.cdFilePath);
-    fflush(stdout);
-    printf("isCd: %d\n", cmd.isCd);
-    fflush(stdout);
-    printf("isComment: %d\n", cmd.isComment);
-    fflush(stdout);
-    printf("commandFilePath: %s\n", cmd.commandFilePath);
-    fflush(stdout);
-}
-
 int main() {
-    home = getenv("HOME");
-    currentWorkingDirectory = malloc(sizeof(char) * (MAX_PATH_LENGTH + 1));
+    home = getenv("HOME"); // setting the home variable for use
+    currentWorkingDirectory = malloc(sizeof(char) * (MAX_PATH_LENGTH + 1)); // allocating memory for current working directory.
     getcwd(currentWorkingDirectory, sizeof(currentWorkingDirectory)); // setting the working directory to the initial directory tha the file is stored in.
 
     signal(SIGINT, killForegroundProcess); // Set up SIGINT signal handler
+    signal(SIGTSTP, signalStop); // set up SIGTSTP signal handler
 
     while (true) {
         struct Command cmd = getUserInput();
         if (cmd.name != NULL && !cmd.isComment) { // only handle the command if it's not a comment and the cmd was not null indicating that nothing was entered by the user. If it is a comment, ignore it.
-            handleUserInput(cmd);
+            handleUserInput(cmd); // passing the cmd, once it's been created, into the handler function
         }
-        freeStructMemory(cmd);
+        freeStructMemory(cmd); // freeing memory of cmd contents.
     } // end of while loop
-}
+} // end of "main" function
